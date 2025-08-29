@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<settings>
+    <category label="Credenciais">
+        <setting id="host" type="text" label="Host (ex: http://seuhost.com:8080)" default="" />
+        <setting id="username" type="text" label="Usuário" default="" />
+        <setting id="password" type="text" label="Senha" option="hidden" default="" />
+    </category>
+
+    <category label="Configurações">
+        <setting id="enable_epg" type="bool" label="Habilitar EPG (Pode ficar lento)" default="false"/>
+        <setting id="retry" type="bool" label="Forçar conexão" default="false"/>
+        <setting id="proxy_http" type="bool" label="Habilitar Proxy HTTP (CASO DE BLOQUEIO)" default="false"/>
+    </category>
+</settings>
