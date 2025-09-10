@@ -298,7 +298,7 @@ def build_menu(items, mode=None, is_playable=False):
     for item in items:
         label = item.get('title', '')
         li = xbmcgui.ListItem(label=label)
-        icon = item.get('icon')
+        icon = item.get('icon', addonIcon)
         if icon:
             li.setArt({'icon': icon, 'thumb': icon})
         else:
@@ -311,9 +311,13 @@ def build_menu(items, mode=None, is_playable=False):
             li.setInfo('video', {'title': label})
 
         if 'url' in item and is_playable:
-            li.setProperty('IsPlayable', 'true')
             play = item['url'] + '|User-Agent=' + USER_AGENT
-            url = build_url(mode='play', url=play)
+            if 'filme:' in label.lower() or 'live' in label.lower():
+                params = {'mode': 'play', 'url': play, 'title': label, 'icon': icon, 'normalplayer': 'true'}
+                url = build_url(**params)
+            else:
+                li.setProperty('IsPlayable', 'true')                
+                url = build_url(mode='play', url=play)
             xbmcplugin.addDirectoryItem(ADDON_HANDLE, url, li, False)
         else:
             url_params = {'mode': mode} if mode else {'mode': item.get('mode')}
@@ -324,7 +328,7 @@ def build_menu(items, mode=None, is_playable=False):
             url = build_url(**url_params)
             xbmcplugin.addDirectoryItem(ADDON_HANDLE, url, li, item.get('folder', True))
 
-    xbmcplugin.endOfDirectory(ADDON_HANDLE, cacheToDisc=False)
+    xbmcplugin.endOfDirectory(ADDON_HANDLE)
 
 # =========================
 # Funções de dados
@@ -438,13 +442,14 @@ def get_seasons(series_id):
     items = []
     for season_name, episodes in seasons.items():
         ep_list = []
-        for ep in episodes:
+        for index, ep in enumerate(episodes):
+            index += 1
             title = html.unescape(ep.get('title', 'Sem título'))
             eid = ep.get('id') or ep.get('episode_id') or ep.get('stream_id')
             ext = (ep.get('info', {}) or {}).get('container_extension') or 'mp4'
             icon = (ep.get('info', {}) or {}).get('cover_big') or (ep.get('info', {}) or {}).get('movie_image', '')
             url = f"{BASE_URL.rstrip('/')}/series/{USERNAME}/{PASSWORD}/{eid}.{ext}" if eid else ep.get('direct_source', '')
-            ep_list.append({'title': title, 'url': url, 'icon': icon})
+            ep_list.append({'title': str(index) + ' - ' + title, 'url': url, 'icon': icon})
 
         payload = urllib.parse.quote(json.dumps(ep_list, ensure_ascii=False), safe='')
         items.append({
@@ -468,6 +473,7 @@ def search_global(query):
                     entry['url'] = i['url']
                     entry['plot'] = i.get('plot', '')
                 else:
+                    entry['mode'] = 'seasons'
                     entry['params'] = i.get('params', '')
                 results.append(entry)
     if not results:
@@ -518,17 +524,19 @@ def get_account_info():
 
     return info_text
 
-def play_item(url):
+def play_item(url, title, icon, normalplayer):
     import proxy
     PORT = proxy.PORT
     if RETRY == 'true':
-        if '.m3u8' in url or '.mp4' in url:  
-            try:
-                url = url.split('|')[0]
-            except:
-                pass                 
+        try:
+            url = url.split('|')[0]
+        except:
+            pass          
+        if '.m3u8' in url:        
             url_proxy = "http://127.0.0.1:{}/hlsretry?url=".format(PORT)
-            url = url_proxy + url
+        else:
+            url_proxy = "http://127.0.0.1:{}/mp4proxy?url=".format(PORT)
+        url = url_proxy + url
     else:
         try:
             url = url.split('|')[0]
@@ -538,11 +546,18 @@ def play_item(url):
             url = url.replace('live/', '').replace('.m3u8', '')
             url_proxy = "http://127.0.0.1:{}/tsdownloader?url=".format(PORT)
         else:
-            url_proxy = "http://127.0.0.1:{}/hlsretry?url=".format(PORT)
+            url_proxy = "http://127.0.0.1:{}/mp4proxy?url=".format(PORT)
         url = url_proxy + url
-    proxy.kodiproxy()   
-    li = xbmcgui.ListItem(path=url)
-    xbmcplugin.setResolvedUrl(ADDON_HANDLE, True, li)
+    proxy.kodiproxy()
+    if normalplayer == 'false': 
+        li = xbmcgui.ListItem(path=url)
+        xbmcplugin.setResolvedUrl(ADDON_HANDLE, True, li)
+    else:
+        li = xbmcgui.ListItem(label=title, path=url)
+        li.setArt({'icon': icon, 'thumb': icon})
+        li.setInfo('video', {'title': title})
+        player = xbmc.Player()
+        player.play(item=url, listitem=li)
 
 # =========================
 # Rotas
@@ -620,7 +635,10 @@ elif mode == 'search':
 
 elif mode == 'play':
     url = get_param('url')
-    play_item(url)
+    normalplayer = get_param('normalplayer', 'false')
+    title = get_param('title', 'Reproduzindo')
+    icon = get_param('icon', addonIcon)
+    play_item(url, title, icon, normalplayer)
 
 else:
     show_dialog("Erro", f"Modo desconhecido: {mode}")

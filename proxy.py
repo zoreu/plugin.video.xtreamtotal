@@ -7,6 +7,7 @@ import time
 import logging
 import threading
 import socket
+from urllib.parse import urljoin, unquote_plus, parse_qs, urlparse
 
 import proxy_http_scraper
 try:
@@ -20,10 +21,6 @@ try:
     from urllib3.exceptions import IncompleteRead
 except ImportError:
     from urllib2 import HTTPError as IncompleteRead  # Python 2 fallback
-#from six.moves.urllib.parse import unquote_plus
-from urllib.parse import unquote_plus
-import proxy_http_scraper
-
 
 # Configuration
 PORT = 8097
@@ -54,7 +51,6 @@ def monitor_kodi_shutdown(server):
         except Exception as e:
             logging.error("Error closing server: %s", e)
     logging.info("Proxy server stopped due to Kodi shutdown.")
-
 
 def get_ip(headers, client_address):
     """Extract client IP from request headers or remote address."""
@@ -149,14 +145,6 @@ def parse_headers(request):
             headers[key] = value
     return headers
 
-def urljoin(base, url):
-    """Custom urljoin for Python 2/3 compatibility."""
-    try:
-        from urllib.parse import urljoin  # Python 3
-    except ImportError:
-        from urlparse import urljoin  # Python 2
-    return urljoin(base, url)
-
 def handle_request(client_socket, client_address, server_socket):
     """Handle incoming HTTP request."""
     try:
@@ -177,10 +165,6 @@ def handle_request(client_socket, client_address, server_socket):
 
         headers = parse_headers(request_data)
         parsed_path = urljoin('http://localhost' + path, path)  # Fake base for parsing
-        try:
-            from urlparse import urlparse, parse_qs  # Python 2
-        except ImportError:
-            from urllib.parse import urlparse, parse_qs  # Python 3
         parsed = urlparse(parsed_path)
         query_params = parse_qs(parsed.query)
         path = parsed.path
@@ -215,6 +199,7 @@ def handle_request(client_socket, client_address, server_socket):
             session = requests.Session()          
             req_headers = dict((k, v) for k, v in headers.items() if k.lower() != 'host')
             req_headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'})
+            timeout = 15
             _ADDON_1 = xbmcaddon.Addon()
             _PROXY_HTTP_1 = _ADDON_1.getSetting('proxy_http') or 'false'
             if _PROXY_HTTP_1 == 'true':
@@ -226,17 +211,10 @@ def handle_request(client_socket, client_address, server_socket):
                         "http": proxies,
                         "https": proxies
                     }
-                timeout = 20
-                try:
-                    url = requests.get(url, headers=headers, allow_redirects=True, proxies=proxies_, stream=True, timeout=10).url
-                except:
-                    pass
-                try:
-                    url = requests.get(url, headers=headers, allow_redirects=True, proxies=proxies_, stream=True, timeout=10).url
-                except:
-                    pass
-            else:
-                timeout = 12
+                    try:
+                        url = requests.get(url, headers=req_headers, allow_redirects=True, proxies=proxies_, stream=True, timeout=10).url
+                    except:
+                        pass
             
             original_headers = req_headers.copy()
             max_retries = 7
@@ -252,12 +230,12 @@ def handle_request(client_socket, client_address, server_socket):
             status = 200
 
             while attempts < max_retries:
-                if '/hl' in url.lower() and '_' in url.lower() and '.ts' in url.lower():
-                    try:
-                        seg_ = re.findall(r'_(.*?)\.ts', url)[0]
-                        url = url.replace('_%s.ts' % seg_, '_%s.ts' % (int(seg_) + 1))
-                    except:
-                        pass                
+                # if '/hl' in url.lower() and '_' in url.lower() and '.ts' in url.lower():
+                #     try:
+                #         seg_ = re.findall(r'_(.*?)\.ts', url)[0]
+                #         url = url.replace('_%s.ts' % seg_, '_%s.ts' % (int(seg_) + 1))
+                #     except:
+                #         pass                
                 try:
                     range_header = req_headers.get('Range')
                     if '.mp4' in url.lower() and range_header and tried_without_range[0]:
@@ -358,6 +336,115 @@ def handle_request(client_socket, client_address, server_socket):
                         return
 
             client_socket.sendall(b"HTTP/1.1 502 Bad Gateway\r\n\r\nFailed to connect after multiple attempts")
+        # New route for MP4 proxy with partial content support
+        elif path == "/mp4proxy":
+            url = query_params.get('url', [None])[0]
+            try:
+                url = unquote_plus(url)
+            except:
+                pass
+            client_ip = get_ip(headers, client_address)
+            cache_key = get_cache_key(client_ip, url)
+
+            if not url or '.mp4' not in url.lower():
+                client_socket.sendall(b"HTTP/1.1 400 Bad Request\r\n\r\nInvalid or missing MP4 URL")
+                return
+
+            session = requests.Session()
+            req_headers = dict((k, v) for k, v in headers.items() if k.lower() != 'host')
+            req_headers.update({'User-Agent': DEFAULT_USER_AGENT})
+
+            # Handle proxy settings
+            _ADDON_2 = xbmcaddon.Addon()
+            _PROXY_HTTP_2 = _ADDON_2.getSetting('proxy_http') or 'false'
+            proxies_ = None
+            timeout = 20
+            if _PROXY_HTTP_2 == 'true':
+                scraper = proxy_http_scraper.ProxyScraper()
+                proxy_selected = scraper.get_proxy()
+                if proxy_selected:
+                    proxies_ = {"http": proxy_selected, "https": proxy_selected}
+                    try:
+                        url = requests.get(url, headers=req_headers, allow_redirects=True, proxies=proxies_, stream=True, timeout=10).url
+                    except:
+                        pass
+
+            max_retries = 7
+            attempts = 0
+            tried_without_range = [False]
+            change_user_agent = [False]
+            media_type = 'video/mp4'
+            response_headers = {}
+            status = 200
+
+            while attempts < max_retries:
+                try:
+                    range_header = req_headers.get('Range')
+                    if range_header and tried_without_range[0]:
+                        req_headers.pop('Range', None)
+
+                    if AGENT_OF_CHAOS.get(cache_key):
+                        req_headers['User-Agent'] = AGENT_OF_CHAOS[cache_key] if change_user_agent[0] else req_headers.get('User-Agent', DEFAULT_USER_AGENT)
+
+                    response = session.get(url, headers=req_headers, allow_redirects=True, stream=True, timeout=timeout, proxies=proxies_)
+                    logging.debug("MP4 PROXY: URL %s, attempt %s, status code %s" % (url, attempts, response.status_code))
+
+                    if response.status_code in (200, 206):
+                        url = response.url
+                        change_user_agent[0] = False
+                        if client_ip in COUNT_CLEAR and COUNT_CLEAR.get(client_ip, 0) > 4:
+                            try:
+                                AGENT_OF_CHAOS.pop(cache_key, None)
+                                IP_CACHE_MP4.pop(cache_key, None)
+                            except:
+                                pass
+                            COUNT_CLEAR[client_ip] = 0
+                        else:
+                            COUNT_CLEAR[client_ip] = COUNT_CLEAR.get(client_ip, 0) + 1
+
+                        response_headers = dict((k, v) for k, v in response.headers.items()
+                                                if k.lower() in ['content-type', 'accept-ranges', 'content-range', 'content-length'])
+                        status = 206 if response.status_code == 206 else 200
+
+                        header_str = f"HTTP/1.1 {status} OK\r\n"
+                        for k, v in response_headers.items():
+                            header_str += f"{k}: {v}\r\n"
+                        if 'content-type' not in response_headers:
+                            header_str += f"Content-Type: {media_type}\r\n"
+                        header_str += "Accept-Ranges: bytes\r\n\r\n"
+                        client_socket.sendall(header_str.encode('utf-8'))
+
+                        for chunk in stream_response(response, client_ip, url, req_headers, session):
+                            client_socket.sendall(chunk)
+                        return
+
+                    elif response.status_code == 416 and range_header and not tried_without_range[0]:
+                        tried_without_range[0] = True
+                        continue
+                    else:
+                        change_user_agent[0] = True
+                        logging.debug("MP4 PROXY: Error code %d, attempt %d" % (response.status_code, attempts))
+                        AGENT_OF_CHAOS[cache_key] = binascii.b2a_hex(os.urandom(20))[:32]
+                        time.sleep(3)
+                        attempts += 1
+                        header_str = f"HTTP/1.1 {status} OK\r\nContent-Type: {media_type}\r\n\r\n"
+                        client_socket.sendall(header_str.encode('utf-8'))
+                        for chunk in stream_cache(client_ip, url) or []:
+                            client_socket.sendall(chunk)
+                        return
+                except RequestException as e:
+                    change_user_agent[0] = True
+                    logging.debug("MP4 PROXY: Unknown error: %s" % e)
+                    AGENT_OF_CHAOS[cache_key] = binascii.b2a_hex(os.urandom(20))[:32]
+                    time.sleep(3)
+                    attempts += 1
+                    header_str = f"HTTP/1.1 {status} OK\r\nContent-Type: {media_type}\r\n\r\n"
+                    client_socket.sendall(header_str.encode('utf-8'))
+                    for chunk in stream_cache(client_ip, url) or []:
+                        client_socket.sendall(chunk)
+                    return
+
+            client_socket.sendall(b"HTTP/1.1 502 Bad Gateway\r\n\r\nFailed to connect after multiple attempts")
         elif path == "/tsdownloader":
             url = query_params.get('url', [None])[0]
             if not url:
@@ -376,39 +463,30 @@ def handle_request(client_socket, client_address, server_socket):
             req_headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'})
             session.headers.update(req_headers)
 
-            # Se quiser usar proxies
-            _ADDON_2 = xbmcaddon.Addon()
-            _PROXY_HTTP_2 = _ADDON_2.getSetting('proxy_http') or 'false'
-            if _PROXY_HTTP_2 == 'true':
+            _ADDON_3 = xbmcaddon.Addon()
+            _PROXY_HTTP_3 = _ADDON_3.getSetting('proxy_http') or 'false'
+            if _PROXY_HTTP_3 == 'true':
                 scraper = proxy_http_scraper.ProxyScraper()
-                proxy_selected = scraper.get_proxy()                
+                proxy_selected = scraper.get_proxy()
                 proxies = proxy_selected
                 if proxies:
                     proxies_ = {
                         "http": proxies,
                         "https": proxies
                     }
-                try:
-                    url = requests.get(url, headers=headers, allow_redirects=True, proxies=proxies_, stream=True, timeout=10).url
-                except:
-                    pass
-                try:
-                    url = requests.get(url, headers=headers, allow_redirects=True, proxies=proxies_, stream=True, timeout=10).url
-                except:
-                    pass
-                last_url[0] = url
+                    try:
+                        url = requests.get(url, headers=req_headers, allow_redirects=True, proxies=proxies_, stream=True, timeout=10).url
+                    except:
+                        pass
+                    last_url[0] = url
 
-            # novo
             def generate_ts():
                 while not stop_ts[0] and not SHUTDOWN_EVENT.is_set():
                     try:
-                        # Atualiza a URL final se ainda não temos
                         if not last_url[0]:
                             last_url[0] = session.get(url, allow_redirects=True, stream=True, timeout=7).url
 
-                        # Requisita os dados usando a session
                         response = session.get(last_url[0], stream=True, timeout=15)
-                        
                         if response.status_code == 200:
                             for chunk in response.iter_content(chunk_size=4096):
                                 if stop_ts[0] or SHUTDOWN_EVENT.is_set():
@@ -423,9 +501,8 @@ def handle_request(client_socket, client_address, server_socket):
                     except Exception as e:
                         logging.warning("[TS Downloader] Stream error: %s" % e)
 
-                logging.warning("[TS Downloader] Stream terminated by client or shutdown")            
+                logging.warning("[TS Downloader] Stream terminated by client or shutdown")
 
-            ######    
             client_socket.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\n\r\n")
             try:
                 for chunk in generate_ts():
@@ -467,8 +544,6 @@ def start_proxy():
         xbmc.log("[Proxy] Failed to bind to port %d: %s" % (PORT, e), level=xbmc.LOGERROR)
         server_socket.close()
         return False
-
-    #monitor = KodiMonitor(server_socket)
 
     def run_server():
         try:

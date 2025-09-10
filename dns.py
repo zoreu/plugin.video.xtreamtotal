@@ -30,8 +30,6 @@ logging.basicConfig(level=logging.DEBUG)
 class customdns:
     def __init__(self, cache_file=CACHE_FILE, cache_ttl=3600):
         self.dns_server = [
-            '94.140.14.140', # adguard
-            '94.140.14.141', # adguard
             '208.67.222.222',# OpenDNS
             '208.67.220.220',# OpenDNS
             '1.1.1.1',       # Cloudflare
