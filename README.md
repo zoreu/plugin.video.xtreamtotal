@@ -7,7 +7,7 @@ não vendemos iptv, isso é apenas um addon que acessa api do xcui mas é necess
 
 ## Recursos do addon
 
-menus: Pesquisa, Tv Ao vivo, Filmes, Séries e Configurações
+menus: Informações, Pesquisa, Tv Ao vivo, Filmes, Séries e Configurações
 
 suporta epg (guia de programação)
 
