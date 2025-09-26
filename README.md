@@ -15,5 +15,5 @@ sistema anti-bloqueio (Proxy, DNS)
 
 ## Como usar de forma gratuita?
 
-o Addon sozinho não faz nada, ele depende de credenciais de xcui (xtream codes), para poder testar pesquiese grupos de iptv no telegram e pegue as credenciais.
+o Addon sozinho não faz nada, ele depende de credenciais de xcui (xtream codes), para poder testar pesquise grupos de iptv no telegram e pegue as credenciais.
 
